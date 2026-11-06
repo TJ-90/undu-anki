@@ -113,7 +113,7 @@ jobs:
             adb shell uiautomator dump /sdcard/final.xml >/dev/null 2>&1 || true
             adb exec-out cat /sdcard/final.xml > "$ev/final-ui.xml" 2>/dev/null || true
             adb logcat -d -v time > "$ev/logcat-full.txt" 2>&1 || true
-            grep -E 'ichi2|AnkiDroid|AndroidRuntime|CardContentProvider|ContentResolver' "$ev/logcat-full.txt" > "$ev/logcat-anki.txt" || true
+            grep -E 'ichi2|AnkiDroid|AndroidRuntime|CardContentProvider|ContentResolver|MischiefGate' "$ev/logcat-full.txt" > "$ev/logcat-anki.txt" || true
             rm -f "$ev/logcat-full.txt"
             adb shell dumpsys package com.ichi2.anki > "$ev/dumpsys-package.txt" 2>&1 || true
             adb shell getprop ro.build.version.release > "$ev/android-release.txt" 2>&1 || true
