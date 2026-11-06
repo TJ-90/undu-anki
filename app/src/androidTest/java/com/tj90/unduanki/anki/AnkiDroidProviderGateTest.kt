@@ -105,6 +105,8 @@ class AnkiDroidProviderGateTest {
         assertEquals(2, outcomes.getValue(Rating.EASY).queue)
         assertTrue(outcomes.getValue(Rating.EASY).interval >= 1)
         reconcileInterruptedReviews(gateway, noteIds, answered)
+        deckSelectionIsolatesCards(root, modelId, noteIds)
+        futureLearningCardIsSuppliedUnderLearnAhead(gateway, coordinator, answered)
         android.util.Log.i("MischiefGate", "observed delays s: again=${delay(Rating.AGAIN)} hard=${delay(Rating.HARD)} good=${delay(Rating.GOOD)} easyInterval=${outcomes.getValue(Rating.EASY).interval}d")
     }
 
@@ -151,6 +153,64 @@ class AnkiDroidProviderGateTest {
             db.close()
             context.deleteDatabase(name)
         }
+    }
+
+    private fun createDeck(root: String, name: String): Long {
+        val values = ContentValues().apply { put("deck_name", name) }
+        val uri = resolver.insert(Uri.parse("$root/decks"), values)
+        assertNotNull("Provider did not create deck $name", uri)
+        return uri!!.lastPathSegment!!.toLong()
+    }
+
+    private fun addNoteToDeck(root: String, modelId: Long, text: String, deckId: Long): Long {
+        val values = ContentValues().apply { put("mid", modelId); put("flds", "$text question\u001f$text answer"); put("tags", "mischief_gate_fixture") }
+        val noteId = resolver.insert(Uri.parse("$root/notes"), values)!!.lastPathSegment!!.toLong()
+        val move = ContentValues().apply { put("deck_id", deckId) }
+        assertEquals("Provider did not move the card", 1, resolver.update(Uri.parse("$root/notes/$noteId/cards/0"), move, null, null))
+        return noteId
+    }
+
+    /** An unrelated deck must never leak cards; descendant behaviour is observed and recorded, not assumed. */
+    private fun deckSelectionIsolatesCards(root: String, modelId: Long, existing: List<Long>) {
+        val parent = createDeck(root, "Gate::Parent")
+        val child = createDeck(root, "Gate::Parent::Child")
+        val other = createDeck(root, "Gate::Other")
+        val inChild = addNoteToDeck(root, modelId, "Child deck", child)
+        val inOther = addNoteToDeck(root, modelId, "Other deck", other)
+        val onlyOther = AnkiDroidGateway(resolver, other).nextCard()
+        assertNotNull("Selected deck supplied nothing", onlyOther)
+        assertEquals("Selecting an unrelated deck must supply only its own card", inOther, onlyOther!!.noteId)
+        val fromDefault = generateSequence { AnkiDroidGateway(resolver, 1).nextCard() }.take(1).toList()
+        assertTrue("Default deck leaked a card from another deck",
+            fromDefault.none { it.noteId == inChild || it.noteId == inOther })
+        val viaParent = AnkiDroidGateway(resolver, parent).nextCard()
+        val childReachable = viaParent?.noteId == inChild
+        val parentLeaks = viaParent != null && (viaParent.noteId == inOther || viaParent.noteId in existing)
+        assertTrue("Selecting a parent deck leaked an unrelated card", !parentLeaks)
+        android.util.Log.i("MischiefGate", "deck isolation: other-only=true parentIncludesDescendant=$childReachable")
+    }
+
+    /** With AnkiDroid's default nonzero learn-ahead, a learning card due soon is supplied once nothing else is. */
+    private fun futureLearningCardIsSuppliedUnderLearnAhead(
+        gateway: AnkiDroidGateway, coordinator: com.tj90.unduanki.study.ReviewSubmissionCoordinator, answered: MutableSet<Long>
+    ) {
+        // Drain remaining new cards in the default deck, so only learning/review cards are left.
+        while (true) {
+            val card = gateway.nextCard() ?: break
+            if (card.state.reps > 0) {
+                val now = System.currentTimeMillis() / 1000
+                val snap = gateway.inspect(card.noteId, card.ordinal)
+                assertEquals("Supplied card should be a learning card", 1, snap.queue)
+                assertTrue("Learning card should be in the future (learn-ahead), due ${snap.due} now $now", snap.due > now)
+                assertTrue("Supplied card must be one this gate already answered", card.cardId in answered)
+                android.util.Log.i("MischiefGate", "learn-ahead supplied a future learning card ${snap.due - now}s ahead")
+                return
+            }
+            assertTrue("Unexpected new card", answered.add(card.cardId))
+            assertEquals(com.tj90.unduanki.study.SubmissionResult.CONFIRMED,
+                coordinator.submit("drain-${card.cardId}", null, CardRef(card.noteId, card.ordinal), card.state, Rating.AGAIN, 500))
+        }
+        throw AssertionError("Scheduler supplied no learning card under the default learn-ahead")
     }
 
     private fun basicModelId(root: String): Long {
