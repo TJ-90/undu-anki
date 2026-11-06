@@ -192,9 +192,14 @@ jobs:
           adb shell am force-stop com.ichi2.anki
           ev="$GITHUB_WORKSPACE/anki-gate-evidence"
           rm -rf "$ev/collection" && mkdir -p "$ev/collection"
-          found=$(adb shell "find /sdcard -name 'collection.anki2*' 2>/dev/null" | tr -d '\r')
-          test -n "$found" || { echo "AnkiDroid collection file not found"; exit 1; }
-          for f in $found; do adb pull "$f" "$ev/collection/" >/dev/null; done
+          adb root >/dev/null 2>&1 || true
+          adb wait-for-device
+          found=$(adb shell "find /sdcard /storage/emulated /data/media /data/user/0/com.ichi2.anki /data/data/com.ichi2.anki -name 'collection.anki2*' 2>/dev/null" | tr -d '\r' | sort -u)
+          printf '%s\n' "$found" > "$ev/collection-paths.txt"
+          main=$(printf '%s\n' "$found" | grep -m1 'collection\.anki2$' || true)
+          test -n "$main" || { echo "AnkiDroid collection file not found; see collection-paths.txt"; exit 1; }
+          dir=$(dirname "$main")
+          for f in $(printf '%s\n' "$found" | grep "^$dir/collection\.anki2"); do adb pull "$f" "$ev/collection/" >/dev/null; done
           python3 - <<'PY'
           import glob, shutil, sqlite3, tempfile, os, sys
           ev = os.path.join(os.environ["GITHUB_WORKSPACE"], "anki-gate-evidence")
