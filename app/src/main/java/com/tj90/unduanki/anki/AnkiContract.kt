@@ -13,6 +13,14 @@ internal object AnkiContract {
         return arrayOf("1", deckId.toString())
     }
 
+    /** Button positions on AnkiDroid's four-button scheduler; confirmed by the provider gate. */
+    fun ease(rating: Rating): Int = when (rating) {
+        Rating.AGAIN -> 1
+        Rating.HARD -> 2
+        Rating.GOOD -> 3
+        Rating.EASY -> 4
+    }
+
     fun deckUri(deckId: Long): String {
         require(deckId > 0)
         return "$ROOT/decks/$deckId"

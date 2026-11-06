@@ -17,4 +17,8 @@ class AnkiContractTest {
         assertThrows(IllegalArgumentException::class.java) { AnkiContract.cardUri(123, -1) }
         assertThrows(IllegalArgumentException::class.java) { AnkiContract.scheduleArguments(0) }
     }
+
+    @Test fun everyRatingHasADistinctProviderButton() {
+        assertEquals(listOf(1, 2, 3, 4), Rating.values().map { AnkiContract.ease(it) })
+    }
 }

@@ -95,4 +95,77 @@ class AnkiDroidProviderGateTest {
         assertEquals(0, scheduled.state.reps)
         assertEquals(scheduled.state, gateway.readState(scheduled.cardId))
     }
+
+    /** Disposable-emulator write test: one fresh synthetic note per rating, answered once each. */
+    @Test fun eachRatingIsRecordedWithDistinctSchedulerOutcomes() {
+        assertEquals("true", InstrumentationRegistry.getArguments().getString("anki_fixture_ephemeral"))
+        assertTrue(Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"))
+        val root = "content://com.ichi2.anki.flashcards"
+        resolver.query(Uri.parse("$root/notes_v2"), arrayOf("_id"), null, null, null)!!.use {
+            assertEquals("Refusing to write to a nonempty collection", 0, it.count)
+        }
+        val modelId = basicModelId(root)
+        val noteIds = (1..4).map { n ->
+            val values = ContentValues().apply {
+                put("mid", modelId)
+                put("flds", "Synthetic rating $n question\u001fSynthetic rating $n answer")
+                put("tags", "mischief_gate_fixture")
+            }
+            resolver.insert(Uri.parse("$root/notes"), values)!!.lastPathSegment!!.toLong()
+        }
+        val gateway = AnkiDroidGateway(resolver, 1)
+        val journal = RecordingJournal()
+        val coordinator = com.tj90.unduanki.study.ReviewSubmissionCoordinator(gateway, journal)
+        val outcomes = mutableMapOf<Rating, AnkiDroidGateway.Snapshot>()
+        val answered = mutableSetOf<Long>()
+        for ((index, rating) in Rating.values().withIndex()) {
+            val before = gateway.nextCard()
+            assertNotNull("Scheduler supplied no card for $rating", before)
+            before!!
+            assertTrue("Scheduler repeated an answered card", answered.add(before.cardId))
+            assertTrue("Card is not one of the synthetic notes", before.noteId in noteIds)
+            assertEquals("Unsupported button count", 4, before.buttonCount)
+            assertEquals(com.tj90.unduanki.study.SubmissionResult.CONFIRMED,
+                coordinator.submit("gate-$index", null, before.state, rating, 1500))
+            val after = gateway.inspect(before.noteId, before.ordinal)
+            assertEquals(before.state.reps + 1, after.state.reps)
+            assertTrue(after.state.lastReviewTimeSeconds > before.state.lastReviewTimeSeconds)
+            outcomes[rating] = after
+        }
+        assertEquals(listOf("pending:gate-0", "confirmed:gate-0", "pending:gate-1", "confirmed:gate-1",
+            "pending:gate-2", "confirmed:gate-2", "pending:gate-3", "confirmed:gate-3"), journal.events)
+        // Observed mapping on a new card: Again < Hard < Good delay while still learning; Easy graduates.
+        val now = System.currentTimeMillis() / 1000
+        fun delay(r: Rating) = outcomes.getValue(r).due - now
+        assertEquals(1, outcomes.getValue(Rating.AGAIN).queue)
+        assertEquals(1, outcomes.getValue(Rating.HARD).queue)
+        assertEquals(1, outcomes.getValue(Rating.GOOD).queue)
+        assertTrue("Again ${delay(Rating.AGAIN)} !< Hard ${delay(Rating.HARD)}", delay(Rating.AGAIN) < delay(Rating.HARD))
+        assertTrue("Hard ${delay(Rating.HARD)} !< Good ${delay(Rating.GOOD)}", delay(Rating.HARD) < delay(Rating.GOOD))
+        assertEquals(2, outcomes.getValue(Rating.EASY).queue)
+        assertTrue(outcomes.getValue(Rating.EASY).interval >= 1)
+        android.util.Log.i("MischiefGate", "observed delays s: again=${delay(Rating.AGAIN)} hard=${delay(Rating.HARD)} good=${delay(Rating.GOOD)} easyInterval=${outcomes.getValue(Rating.EASY).interval}d")
+    }
+
+    private fun basicModelId(root: String): Long {
+        val models = resolver.query(Uri.parse("$root/models"),
+            arrayOf("_id", "name", "field_names", "num_cards", "type", "deck_id"), null, null, null)
+        assertNotNull("Cannot inspect note types", models)
+        return models!!.use { cursor ->
+            var found: Long? = null
+            while (cursor.moveToNext()) {
+                val fields = cursor.getString(2).split('\u001f')
+                if (cursor.getString(1) == "Basic" && fields == listOf("Front", "Back") &&
+                    cursor.getInt(3) == 1 && cursor.getInt(4) == 0 && cursor.getLong(5) == 1L) { found = cursor.getLong(0); break }
+            }
+            checkNotNull(found) { "Fresh collection has no supported Basic forward note type" }
+        }
+    }
+
+    private class RecordingJournal : com.tj90.unduanki.study.ReviewJournal {
+        val events = mutableListOf<String>()
+        override fun pending(id: String, batchId: String?, before: CardState, rating: Rating, elapsedMs: Long) { events += "pending:$id" }
+        override fun uncertain(id: String) { events += "uncertain:$id" }
+        override fun confirmed(id: String) { events += "confirmed:$id" }
+    }
 }

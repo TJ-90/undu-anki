@@ -1,6 +1,7 @@
 package com.tj90.unduanki.anki
 
 import android.content.ContentResolver
+import android.content.ContentValues
 import android.database.Cursor
 import android.net.Uri
 import org.json.JSONArray
@@ -64,13 +65,30 @@ internal class AnkiDroidGateway(private val resolver: ContentResolver, private v
         return state
     }
 
-    override fun answer(cardId: Long, rating: Rating, elapsedMs: Long): Nothing {
-        // The current interface does not carry a verified mapping for the installed provider.
-        // A provider update must not be enabled until the documented compatibility gate passes.
-        throw UnsupportedOperationException("Live AnkiDroid review is not verified")
+    /**
+     * Submits one rating. A returned count is not proof of a completed review (the provider can
+     * swallow a failure), so callers must confirm through [readState]; never retry blindly.
+     */
+    override fun answer(cardId: Long, rating: Rating, elapsedMs: Long) {
+        val card = checkNotNull(current) { "No scheduled card is bound" }
+        check(card.cardId == cardId) { "Card is not the current scheduled card" }
+        // Only the four-button scheduler has a verified Again/Hard/Good/Easy mapping.
+        check(card.buttonCount == 4) { "Unsupported AnkiDroid button mapping: ${card.buttonCount} buttons" }
+        require(elapsedMs >= 0)
+        val values = ContentValues().apply {
+            put("note_id", card.noteId)
+            put("ord", card.ordinal)
+            put("answer_ease", AnkiContract.ease(rating))
+            put("time_taken", elapsedMs)
+        }
+        val updated = resolver.update(Uri.parse(AnkiContract.SCHEDULE_URI), values, null, null)
+        check(updated == 1) { "AnkiDroid reported $updated updated reviews" }
     }
 
-    private data class Snapshot(val state: CardState, val queue: Int, val due: Long, val interval: Long)
+    internal data class Snapshot(val state: CardState, val queue: Int, val due: Long, val interval: Long)
+
+    /** Read-only inspection of a specific card, used by the provider gate. */
+    internal fun inspect(noteId: Long, ordinal: Int): Snapshot = readCard(noteId, ordinal)
 
     private fun readCard(noteId: Long, ordinal: Int): Snapshot {
         val cursor = resolver.query(Uri.parse(AnkiContract.cardUri(noteId, ordinal)), AnkiContract.cardColumns, null, null, null)
