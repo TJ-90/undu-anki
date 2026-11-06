@@ -6,3 +6,5 @@ local.properties
 .omx/
 *.jks
 *.keystore
+.undo-stack/
+.omc/
