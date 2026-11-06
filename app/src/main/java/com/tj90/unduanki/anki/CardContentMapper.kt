@@ -10,7 +10,7 @@ object CardContentMapper {
     private val templateTag = Regex("</?(?:b|strong|i|em|u|s|strike|br|p|div|ul|ol|li|sub|sup)\\s*/?>|<hr\\s+id\\s*=\\s*['\"]?answer['\"]?\\s*/?>", RegexOption.IGNORE_CASE)
     private val entity = Regex("&(?:amp|lt|gt|quot|nbsp|#39);", RegexOption.IGNORE_CASE)
     private val unsafeText = Regex("\\[sound:|\\[/?latex\\]|\\[/?mathjax\\]|\\\\[\\(\\)\\[\\]]|\\$\\$|\\{\\{", RegexOption.IGNORE_CASE)
-    private val expression = Regex("\\{\\{([^{}]+)}}")
+    private val expression = Regex("\\{\\{([^{}]+)\\}\\}")
 
     fun map(templates: List<CardTemplate>, mapping: FieldMapping, fields: Map<String, String>): MappedCard? {
         if (templates.size != 1 || mapping.question.isBlank() || mapping.answer.isBlank() || mapping.question == mapping.answer) return null

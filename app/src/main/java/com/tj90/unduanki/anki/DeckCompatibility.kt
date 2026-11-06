@@ -35,7 +35,7 @@ data class DeckCompatibility(val noteCount: Int, val verdicts: List<ModelVerdict
 }
 
 object DeckCompatibilityChecker {
-    private val expression = Regex("\\{\\{([^{}]+)}}")
+    private val expression = Regex("\\{\\{([^{}]+)\\}\\}")
 
     /** Derives the question/answer fields from the single forward template, or explains why not. */
     fun deriveMapping(model: ModelInfo): Pair<FieldMapping?, String?> {
