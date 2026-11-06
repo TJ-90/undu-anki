@@ -44,6 +44,9 @@ class LiveStudyFlowTest {
         assumeTrue("Run only in the dedicated live-flow job", args.getString("anki_live_flow") == "true")
         assertEquals("true", args.getString("anki_fixture_ephemeral"))
         assertTrue("Emulator only", Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"))
+        // Gradle installs a fresh copy of the app for every connected run, so grant AnkiDroid's API
+        // permission here with the instrumentation's shell identity (what `pm grant` does).
+        instrumentation.uiAutomation.grantRuntimePermission(context.packageName, "com.ichi2.anki.permission.READ_WRITE_DATABASE")
         assertEquals(PackageManager.PERMISSION_GRANTED, context.checkSelfPermission("com.ichi2.anki.permission.READ_WRITE_DATABASE"))
         assertTrue("Fresh app state required", context.getSharedPreferences("app-mode", 0).all.isEmpty() &&
             !context.getDatabasePath("game-progress.db").exists())

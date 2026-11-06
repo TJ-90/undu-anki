@@ -153,8 +153,6 @@ jobs:
           adb shell rm -rf /sdcard/AnkiDroid
           adb shell pm clear com.ichi2.anki
           python3 "$GITHUB_WORKSPACE/.github/scripts/anki-onboard.py" "$ev"
-          # Clearing AnkiDroid also drops this app's grant of its API permission.
-          adb shell pm grant com.tj90.unduanki.debug com.ichi2.anki.permission.READ_WRITE_DATABASE
           ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tj90.unduanki.ui.LiveStudyFlowTest -Pandroid.testInstrumentationRunnerArguments.anki_live_flow=true -Pandroid.testInstrumentationRunnerArguments.anki_fixture_ephemeral=true
           pull_collection "$ev/collection"
           python3 "$GITHUB_WORKSPACE/.github/scripts/check-revlog.py" "$ev" "$ev/collection" live 3,3,3
