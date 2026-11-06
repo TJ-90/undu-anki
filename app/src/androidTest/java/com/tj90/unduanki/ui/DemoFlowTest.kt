@@ -42,7 +42,7 @@ class DemoFlowTest {
 
     @Test fun firstLaunchExplainsDemoAndOffersTutorial() {
         launch()
-        assertTrue(hasText("Real AnkiDroid study is not available yet."))
+        assertTrue(hasText("Real AnkiDroid study is off in demo mode"))
         assertNotNull(button("Play the tutorial"))
         assertFalse(hasButton("Study sample questions"))
     }

@@ -107,6 +107,8 @@ class AnkiDroidProviderGateTest {
         reconcileInterruptedReviews(gateway, noteIds, answered)
         deckSelectionIsolatesCards(root, modelId, noteIds)
         futureLearningCardIsSuppliedUnderLearnAhead(gateway, coordinator, answered)
+        // Last: the reversed note below leaves a second new card in the default deck.
+        catalogInspectsRealDecksAndNotes(root, modelId)
         android.util.Log.i("MischiefGate", "observed delays s: again=${delay(Rating.AGAIN)} hard=${delay(Rating.HARD)} good=${delay(Rating.GOOD)} easyInterval=${outcomes.getValue(Rating.EASY).interval}d")
     }
 
@@ -212,6 +214,44 @@ class AnkiDroidProviderGateTest {
         }
         throw AssertionError("Scheduler supplied no learning card under the default learn-ahead")
     }
+
+    /** Setup inspection against the real provider: supported, reversed and media notes are told apart. */
+    private fun catalogInspectsRealDecksAndNotes(root: String, basicId: Long) {
+        val catalog = AnkiDeckCatalog(resolver)
+        assertTrue("Catalog must report a working collection", catalog.isReadable())
+        val decks = catalog.decks()
+        assertTrue("Created deck not listed: $decks", decks.any { it.name == "Gate::Other" })
+        val models = catalog.models()
+        val basic = models.getValue(basicId)
+        assertEquals(FieldMapping("Front", "Back") to null, DeckCompatibilityChecker.deriveMapping(basic))
+
+        val good = DeckCompatibilityChecker.evaluate(models, catalog.notesInDeck("Gate::Other"))
+        assertTrue(good.summary(), good.usable)
+        assertEquals(1, good.noteCount)
+
+        val reversed = models.values.first { it.name == "Basic (and reversed card)" }
+        val reversedDeck = createDeck(root, "Gate::Reversed")
+        val reversedValues = ContentValues().apply { put("mid", reversed.id); put("flds", "Rev q\u001fRev a"); put("tags", "mischief_gate_fixture") }
+        val reversedNote = resolver.insert(Uri.parse("$root/notes"), reversedValues)!!.lastPathSegment!!.toLong()
+        resolver.update(Uri.parse("$root/notes/$reversedNote/cards/0"), ContentValues().apply { put("deck_id", reversedDeck) }, null, null)
+        val badReversed = DeckCompatibilityChecker.evaluate(models, catalog.notesInDeck("Gate::Reversed"))
+        assertFalse("Reversed notes must block the deck", badReversed.usable)
+        assertTrue(badReversed.summary(), badReversed.summary().contains("card templates"))
+
+        val mediaDeck = createDeck(root, "Gate::Media")
+        val mediaNote = addNoteToDeck(root, basicId, "Media", mediaDeck)
+        resolver.update(Uri.parse("$root/notes/$mediaNote"), ContentValues().apply { put("flds", "Look <img src=x>\u001fAnswer") }, null, null)
+        val media = DeckCompatibilityChecker.evaluate(models, catalog.notesInDeck("Gate::Media"))
+        assertFalse("A note with an image must block the deck", media.usable)
+        assertEquals(1, media.verdicts.single().unsupportedNotes)
+
+        val fresh = catalog.note(noteIdOf(catalog, "Gate::Other"))
+        assertNotNull(fresh)
+        assertEquals(2, fresh!!.fields.size)
+        android.util.Log.i("MischiefGate", "catalog: decks=${decks.size} basic ok, reversed blocked, media blocked")
+    }
+
+    private fun noteIdOf(catalog: AnkiDeckCatalog, deck: String): Long = catalog.notesInDeck(deck).first().id
 
     private fun basicModelId(root: String): Long {
         val models = resolver.query(Uri.parse("$root/models"),
