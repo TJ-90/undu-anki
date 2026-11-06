@@ -6,12 +6,29 @@ import java.util.UUID
 
 /** Mutations are transactional; provider writes must happen separately and are never replayed here. */
 class ProgressRepository(private val helper: GameDatabase) {
+    data class UnresolvedAttempt(val id: String, val cardId: Long, val preReps: Int, val preReviewTime: Long, val status: String)
+
+    /** Recovery inspects these records and must never automatically resubmit them. */
+    fun unresolvedAttempts(): List<UnresolvedAttempt> = helper.readableDatabase.rawQuery(
+        "SELECT id, card_id, pre_reps, pre_review_time, status FROM attempts WHERE status IN ('pending','uncertain')", null
+    ).use { cursor ->
+        buildList {
+            while (cursor.moveToNext()) add(UnresolvedAttempt(cursor.getString(0), cursor.getLong(1), cursor.getInt(2), cursor.getLong(3), cursor.getString(4)))
+        }
+    }
+
+    /** Parent decision: the previous write is not replayed; fetch a fresh scheduled card. */
+    fun abandonUnresolved(id: String) {
+        check(helper.writableDatabase.update("attempts", values("status" to "abandoned"), "id=? AND status IN ('pending','uncertain')", arrayOf(id)) == 1)
+    }
+
     fun startBatch(connectionId: String, target: Int, seed: Long, difficulty: String): String {
         require(difficulty in setOf("easy", "normal"))
         require(target in 3..10)
         val db = helper.writableDatabase
         return transaction(db) {
             check(!exists(db, "SELECT 1 FROM tickets WHERE status='earned'"))
+            check(!exists(db, "SELECT 1 FROM attempts WHERE status IN ('pending','uncertain')"))
             val id = UUID.randomUUID().toString()
             db.insertOrThrow("batches", null, values("id" to id, "connection_id" to connectionId, "target" to target, "seed" to seed, "difficulty" to difficulty, "state" to "active"))
             id
