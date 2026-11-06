@@ -164,6 +164,9 @@ jobs:
                   root = ET.fromstring(xml)
               except ET.ParseError:
                   continue
+              if any(n.get("resource-id", "").endswith(":id/deck_picker_content_wrapper") for n in root.iter("node")):
+                  continued = True
+                  break
               for node in root.iter("node"):
                   if node.get("resource-id", "").endswith(":id/continue_button") and node.get("enabled") == "true":
                       bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
@@ -175,7 +178,7 @@ jobs:
               if continued:
                   break
           if not continued:
-              raise SystemExit("AnkiDroid permissions Continue never became enabled; see after-get-started.xml")
+              raise SystemExit("AnkiDroid never reached the deck picker; see after-get-started.xml")
           time.sleep(20)
           subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/after.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
           (evidence / "after-continue.xml").write_bytes(subprocess.run(["adb", "exec-out", "cat", "/sdcard/after.xml"], capture_output=True).stdout)
