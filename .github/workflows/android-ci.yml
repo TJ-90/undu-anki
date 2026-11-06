@@ -187,6 +187,33 @@ jobs:
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb shell pm grant com.tj90.unduanki.debug com.ichi2.anki.permission.READ_WRITE_DATABASE
           ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tj90.unduanki.anki.AnkiDroidProviderGateTest -Pandroid.testInstrumentationRunnerArguments.anki_provider_gate=true -Pandroid.testInstrumentationRunnerArguments.anki_fixture_ephemeral=true
+          # Real review history: read AnkiDroid's own revlog from the disposable emulator's synthetic
+          # collection. The copied database is deleted before artifacts upload; only a summary stays.
+          adb shell am force-stop com.ichi2.anki
+          ev="$GITHUB_WORKSPACE/anki-gate-evidence"
+          rm -rf "$ev/collection" && mkdir -p "$ev/collection"
+          found=$(adb shell "find /sdcard -name 'collection.anki2*' 2>/dev/null" | tr -d '\r')
+          test -n "$found" || { echo "AnkiDroid collection file not found"; exit 1; }
+          for f in $found; do adb pull "$f" "$ev/collection/" >/dev/null; done
+          python3 - <<'PY'
+          import glob, shutil, sqlite3, tempfile, os, sys
+          ev = os.path.join(os.environ["GITHUB_WORKSPACE"], "anki-gate-evidence")
+          work = tempfile.mkdtemp()
+          for f in glob.glob(os.path.join(ev, "collection", "collection.anki2*")):
+              shutil.copy(f, work)
+          con = sqlite3.connect(os.path.join(work, "collection.anki2"))
+          rows = con.execute("select ease, time, type, ivl from revlog order by id").fetchall()
+          lines = ["ease,time_ms,type,ivl"] + [",".join(map(str, r)) for r in rows]
+          expected = [(1, 1500), (2, 1500), (3, 1500), (4, 1500), (3, 900), (1, 500)]
+          got = [(r[0], r[1]) for r in rows]
+          lines.append("expected_ease_time=" + str(expected))
+          lines.append("match=" + str(got == expected))
+          open(os.path.join(ev, "revlog-summary.txt"), "w").write("\n".join(lines) + "\n")
+          print("\n".join(lines))
+          shutil.rmtree(os.path.join(ev, "collection"))
+          if got != expected:
+              sys.exit("revlog does not match the reviews the gate submitted")
+          PY
           SCRIPT
       - name: Prepare fresh collection and run the read-only provider suite
         uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
