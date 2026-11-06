@@ -1,0 +1,48 @@
+name: Family APK
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  family:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+      ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+      ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+      ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+      ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/family.jks
+      FAMILY_VERSION_CODE: ${{ 1000 + github.run_number }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Check signing secrets
+        run: |
+          for name in ANDROID_KEYSTORE_BASE64 ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then echo "Missing required secret: $name" >&2; exit 1; fi
+          done
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+      - uses: actions/setup-java@c5195efecf7bdfc987ee8bae7a71cb8b11521c00 # v4.7.1
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+      - uses: gradle/actions/setup-gradle@41ad77ca97e46ee2e825d5e6b9a95d8169fcc44c # v4.4.2
+      - run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:lintRelease :app:assembleRelease
+      - name: Verify signature and collect artifact
+        run: |
+          mkdir -p artifact
+          cp app/build/outputs/apk/release/*.apk artifact/
+          "$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs artifact/*.apk > artifact/signature.txt
+          (cd artifact && sha256sum *.apk > SHA256SUMS)
+          printf 'commit=%s\nversionCode=%s\njava=17\ngradle=8.9\nagp=8.7.3\nkotlin=2.0.21\n' "$GITHUB_SHA" "$FAMILY_VERSION_CODE" > artifact/build-metadata.txt
+          echo "SHORT_SHA=${GITHUB_SHA:0:7}" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mischief-island-family-${{ env.FAMILY_VERSION_CODE }}-${{ env.SHORT_SHA }}
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$ANDROID_KEYSTORE_PATH"
