@@ -50,53 +50,10 @@ class AnkiDroidProviderGateTest {
         }
     }
 
-    @Test fun syntheticForwardNoteIsScheduledAndCanBeReadBack() {
-        // Insert only when the caller explicitly attests this is the disposable CI fixture.
-        // A normal provider gate or an ordinary instrumentation run never creates a note.
-        assertEquals("Fixture requires an explicitly disposable emulator", "true",
-            InstrumentationRegistry.getArguments().getString("anki_fixture_ephemeral"))
-        assertTrue("Fixture may run only on an Android emulator",
-            Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"))
-
-        val root = "content://com.ichi2.anki.flashcards"
-        val notes = resolver.query(Uri.parse("$root/notes_v2"), arrayOf("_id"), null, null, null)
-        assertNotNull("Cannot verify that the collection is empty", notes)
-        notes!!.use { assertEquals("Refusing to write to a nonempty collection", 0, it.count) }
-
-        val models = resolver.query(Uri.parse("$root/models"),
-            arrayOf("_id", "name", "field_names", "num_cards", "type", "deck_id"), null, null, null)
-        assertNotNull("Cannot inspect note types", models)
-        val modelId = models!!.use { cursor ->
-            var found: Long? = null
-            while (cursor.moveToNext()) {
-                val fields = cursor.getString(2).split('\u001f')
-                if (cursor.getString(1) == "Basic" && fields == listOf("Front", "Back") &&
-                    cursor.getInt(3) == 1 && cursor.getInt(4) == 0 && cursor.getLong(5) == 1L) {
-                    found = cursor.getLong(0)
-                    break
-                }
-            }
-            found
-        }
-        assertNotNull("Fresh collection has no supported Basic forward note type", modelId)
-        val values = ContentValues().apply {
-            put("mid", modelId!!)
-            put("flds", "Synthetic gate question\u001fSynthetic gate answer")
-            put("tags", "mischief_gate_fixture")
-        }
-        val created = resolver.insert(Uri.parse("$root/notes"), values)
-        assertNotNull("Provider did not return the new synthetic note", created)
-        val noteId = created!!.lastPathSegment!!.toLong()
-        val gateway = AnkiDroidGateway(resolver, 1)
-        val scheduled = gateway.nextCard()
-        assertNotNull("Synthetic card was not supplied by the scheduler", scheduled)
-        assertEquals(noteId, scheduled!!.noteId)
-        assertEquals(0, scheduled.ordinal)
-        assertEquals(0, scheduled.state.reps)
-        assertEquals(scheduled.state, gateway.readState(scheduled.cardId))
-    }
-
-    /** Disposable-emulator write test: one fresh synthetic note per rating, answered once each. */
+    /**
+     * The only test that writes to AnkiDroid: one fresh synthetic note per rating, answered once each.
+     * Keep it the sole writer; it refuses a nonempty collection.
+     */
     @Test fun eachRatingIsRecordedWithDistinctSchedulerOutcomes() {
         assertEquals("true", InstrumentationRegistry.getArguments().getString("anki_fixture_ephemeral"))
         assertTrue(Build.HARDWARE.contains("ranchu") || Build.HARDWARE.contains("goldfish"))
@@ -125,6 +82,9 @@ class AnkiDroidProviderGateTest {
             assertTrue("Scheduler repeated an answered card", answered.add(before.cardId))
             assertTrue("Card is not one of the synthetic notes", before.noteId in noteIds)
             assertEquals("Unsupported button count", 4, before.buttonCount)
+            assertEquals(0, before.ordinal)
+            assertEquals("A new synthetic card must have no prior reviews", 0, before.state.reps)
+            assertEquals(before.state, gateway.readState(before.cardId))
             assertEquals(com.tj90.unduanki.study.SubmissionResult.CONFIRMED,
                 coordinator.submit("gate-$index", null, before.state, rating, 1500))
             val after = gateway.inspect(before.noteId, before.ordinal)
