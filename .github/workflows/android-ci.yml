@@ -121,104 +121,41 @@ jobs:
             adb shell content query --uri content://com.ichi2.anki.flashcards/decks/1 > "$ev/shell-deck-query.txt" 2>&1 || true
           }
           trap collect_evidence EXIT
+          pull_collection() {
+            # Copies the disposable emulator's synthetic collection to $1 (rooted adb on the default image).
+            adb shell am force-stop com.ichi2.anki
+            rm -rf "$1" && mkdir -p "$1"
+            adb root >/dev/null 2>&1 || true
+            adb wait-for-device
+            found=$(adb shell "find /sdcard /storage/emulated /data/media /data/user/0/com.ichi2.anki /data/data/com.ichi2.anki -name 'collection.anki2*' 2>/dev/null" | tr -d '\r' | sort -u)
+            printf '%s\n' "$found" >> "$GITHUB_WORKSPACE/anki-gate-evidence/collection-paths.txt"
+            main=$(printf '%s\n' "$found" | grep -m1 'collection\.anki2$' || true)
+            test -n "$main" || { echo "AnkiDroid collection file not found; see collection-paths.txt"; exit 1; }
+            dir=$(dirname "$main")
+            for f in $(printf '%s\n' "$found" | grep "^$dir/collection\.anki2"); do adb pull "$f" "$1/" >/dev/null; done
+          }
+          ev="$GITHUB_WORKSPACE/anki-gate-evidence"
           adb install "$RUNNER_TEMP/ankidroid.apk"
-          adb shell monkey -p com.ichi2.anki -c android.intent.category.LAUNCHER 1
-          python3 -c '
-          import re, subprocess, time, xml.etree.ElementTree as ET
-          from pathlib import Path
-          evidence = Path("anki-gate-evidence")
-          started = False
-          for attempt in range(60):
-              time.sleep(2)
-              subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/window.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-              xml = subprocess.run(["adb", "exec-out", "cat", "/sdcard/window.xml"], capture_output=True).stdout
-              (evidence / "onboarding.xml").write_bytes(xml)
-              try:
-                  root = ET.fromstring(xml)
-              except ET.ParseError:
-                  continue
-              for node in root.iter("node"):
-                  resource = node.get("resource-id", "")
-                  if resource.endswith(":id/get_started"):
-                      bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
-                      if bounds:
-                          x1, y1, x2, y2 = map(int, bounds.groups())
-                          subprocess.run(["adb", "shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2)], check=True)
-                          started = True
-                          break
-              if started:
-                  break
-          if not started:
-              raise SystemExit("AnkiDroid Get started screen not found; see onboarding.xml")
-          # Fresh AnkiDroid blocks on a permissions screen (All files access) until granted; the
-          # collection is not opened, so the provider returns null cursors. Disposable emulator only.
-          subprocess.run(["adb", "shell", "appops", "set", "com.ichi2.anki", "MANAGE_EXTERNAL_STORAGE", "allow"], check=True)
-          subprocess.run(["adb", "shell", "monkey", "-p", "com.ichi2.anki", "-c", "android.intent.category.LAUNCHER", "1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          continued = False
-          for attempt in range(40):
-              time.sleep(3)
-              subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/window.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-              xml = subprocess.run(["adb", "exec-out", "cat", "/sdcard/window.xml"], capture_output=True).stdout
-              (evidence / "after-get-started.xml").write_bytes(xml)
-              try:
-                  root = ET.fromstring(xml)
-              except ET.ParseError:
-                  continue
-              if any(n.get("resource-id", "").endswith(":id/deck_picker_content_wrapper") for n in root.iter("node")):
-                  continued = True
-                  break
-              for node in root.iter("node"):
-                  if node.get("resource-id", "").endswith(":id/continue_button") and node.get("enabled") == "true":
-                      bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
-                      if bounds:
-                          x1, y1, x2, y2 = map(int, bounds.groups())
-                          subprocess.run(["adb", "shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2)], check=True)
-                          continued = True
-                          break
-              if continued:
-                  break
-          if not continued:
-              raise SystemExit("AnkiDroid never reached the deck picker; see after-get-started.xml")
-          time.sleep(20)
-          subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/after.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          (evidence / "after-continue.xml").write_bytes(subprocess.run(["adb", "exec-out", "cat", "/sdcard/after.xml"], capture_output=True).stdout)
-          '
+          python3 "$GITHUB_WORKSPACE/.github/scripts/anki-onboard.py" "$ev"
           ./gradlew :app:assembleDebug
           adb install -r app/build/outputs/apk/debug/app-debug.apk
           adb shell pm grant com.tj90.unduanki.debug com.ichi2.anki.permission.READ_WRITE_DATABASE
+
+          # Phase 1: provider contract, ratings, reconciliation, isolation, catalog.
           ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tj90.unduanki.anki.AnkiDroidProviderGateTest -Pandroid.testInstrumentationRunnerArguments.anki_provider_gate=true -Pandroid.testInstrumentationRunnerArguments.anki_fixture_ephemeral=true
-          # Real review history: read AnkiDroid's own revlog from the disposable emulator's synthetic
-          # collection. The copied database is deleted before artifacts upload; only a summary stays.
+          pull_collection "$ev/collection"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/check-revlog.py" "$ev" "$ev/collection" provider 1,2,3,4,3,1 1500,1500,1500,1500,900,500
+
+          # Phase 2: reset the disposable emulator's AnkiDroid, then drive the real app screens end to end.
           adb shell am force-stop com.ichi2.anki
-          ev="$GITHUB_WORKSPACE/anki-gate-evidence"
-          rm -rf "$ev/collection" && mkdir -p "$ev/collection"
           adb root >/dev/null 2>&1 || true
           adb wait-for-device
-          found=$(adb shell "find /sdcard /storage/emulated /data/media /data/user/0/com.ichi2.anki /data/data/com.ichi2.anki -name 'collection.anki2*' 2>/dev/null" | tr -d '\r' | sort -u)
-          printf '%s\n' "$found" > "$ev/collection-paths.txt"
-          main=$(printf '%s\n' "$found" | grep -m1 'collection\.anki2$' || true)
-          test -n "$main" || { echo "AnkiDroid collection file not found; see collection-paths.txt"; exit 1; }
-          dir=$(dirname "$main")
-          for f in $(printf '%s\n' "$found" | grep "^$dir/collection\.anki2"); do adb pull "$f" "$ev/collection/" >/dev/null; done
-          python3 - <<'PY'
-          import glob, shutil, sqlite3, tempfile, os, sys
-          ev = os.path.join(os.environ["GITHUB_WORKSPACE"], "anki-gate-evidence")
-          work = tempfile.mkdtemp()
-          for f in glob.glob(os.path.join(ev, "collection", "collection.anki2*")):
-              shutil.copy(f, work)
-          con = sqlite3.connect(os.path.join(work, "collection.anki2"))
-          rows = con.execute("select ease, time, type, ivl from revlog order by id").fetchall()
-          lines = ["ease,time_ms,type,ivl"] + [",".join(map(str, r)) for r in rows]
-          expected = [(1, 1500), (2, 1500), (3, 1500), (4, 1500), (3, 900), (1, 500)]
-          got = [(r[0], r[1]) for r in rows]
-          lines.append("expected_ease_time=" + str(expected))
-          lines.append("match=" + str(got == expected))
-          open(os.path.join(ev, "revlog-summary.txt"), "w").write("\n".join(lines) + "\n")
-          print("\n".join(lines))
-          shutil.rmtree(os.path.join(ev, "collection"))
-          if got != expected:
-              sys.exit("revlog does not match the reviews the gate submitted")
-          PY
+          adb shell rm -rf /sdcard/AnkiDroid
+          adb shell pm clear com.ichi2.anki
+          python3 "$GITHUB_WORKSPACE/.github/scripts/anki-onboard.py" "$ev"
+          ./gradlew :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.tj90.unduanki.ui.LiveStudyFlowTest -Pandroid.testInstrumentationRunnerArguments.anki_live_flow=true -Pandroid.testInstrumentationRunnerArguments.anki_fixture_ephemeral=true
+          pull_collection "$ev/collection"
+          python3 "$GITHUB_WORKSPACE/.github/scripts/check-revlog.py" "$ev" "$ev/collection" live 3,3,3
           SCRIPT
       - name: Prepare fresh collection and run the read-only provider suite
         uses: reactivecircus/android-emulator-runner@1dcd0090116d15e7c562f8db72807de5e036a4ed # v2.34.0
