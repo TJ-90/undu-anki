@@ -22,7 +22,7 @@ class ProgressRepositoryTest {
     @Test fun repeatedCardsCountOnceAndExhaustionIssuesTicket() {
         val batch = progress.startBatch("synthetic", 3, 42, "easy")
         for (i in 1..3) {
-            progress.recordPending("attempt-$i", batch, 1, i, i.toLong(), "again", 100)
+            progress.recordPending("attempt-$i", batch, 1, 0, 1, i, i.toLong(), "again", 100)
             assertFalse(progress.confirm("attempt-$i"))
         }
         assertTrue(progress.finishExhausted(batch))
@@ -32,18 +32,21 @@ class ProgressRepositoryTest {
 
     @Test fun unresolvedAttemptBlocksAnotherBatchAndSurvivesReopen() {
         val batch = progress.startBatch("synthetic", 3, 42, "easy")
-        progress.recordPending("pending", batch, 7, 1, 10, "good", 100)
+        progress.recordPending("pending", batch, 70, 0, 7, 1, 10, "good", 100)
         db.close()
         db = GameDatabase(context, databaseName = name)
         progress = ProgressRepository(db)
-        assertEquals("pending", progress.unresolvedAttempts().single().id)
+        val kept = progress.unresolvedAttempts().single()
+        assertEquals("pending", kept.id)
+        assertEquals(70L, kept.noteId)
+        assertEquals(0, kept.ordinal)
         try { progress.startBatch("synthetic", 3, 1, "easy"); fail("unresolved attempt allowed another batch") } catch (_: IllegalStateException) { }
         progress.abandonUnresolved("pending")
         assertTrue(progress.unresolvedAttempts().isEmpty())
     }
     @Test fun cannotAbandonBatchWhileReviewIsUnresolved() {
         val batch = progress.startBatch("synthetic", 3, 42, "easy")
-        progress.recordPending("pending", batch, 7, 1, 10, "good", 100)
+        progress.recordPending("pending", batch, 70, 0, 7, 1, 10, "good", 100)
         try { progress.abandonBatch(batch); fail("unresolved review discarded") } catch (_: IllegalStateException) { }
         progress.abandonUnresolved("pending")
         progress.abandonBatch(batch)

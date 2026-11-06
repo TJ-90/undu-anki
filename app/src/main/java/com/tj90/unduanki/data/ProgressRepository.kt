@@ -6,14 +6,15 @@ import java.util.UUID
 
 /** Mutations are transactional; provider writes must happen separately and are never replayed here. */
 class ProgressRepository(private val helper: GameDatabase) {
-    data class UnresolvedAttempt(val id: String, val cardId: Long, val preReps: Int, val preReviewTime: Long, val status: String)
+    /** [noteId] is 0 and [ordinal] is -1 for rows written before schema 2; those cannot be re-read. */
+    data class UnresolvedAttempt(val id: String, val noteId: Long, val ordinal: Int, val cardId: Long, val preReps: Int, val preReviewTime: Long, val status: String)
 
     /** Recovery inspects these records and must never automatically resubmit them. */
     fun unresolvedAttempts(): List<UnresolvedAttempt> = helper.readableDatabase.rawQuery(
-        "SELECT id, card_id, pre_reps, pre_review_time, status FROM attempts WHERE status IN ('pending','uncertain')", null
+        "SELECT id, note_id, ord, card_id, pre_reps, pre_review_time, status FROM attempts WHERE status IN ('pending','uncertain')", null
     ).use { cursor ->
         buildList {
-            while (cursor.moveToNext()) add(UnresolvedAttempt(cursor.getString(0), cursor.getLong(1), cursor.getInt(2), cursor.getLong(3), cursor.getString(4)))
+            while (cursor.moveToNext()) add(UnresolvedAttempt(cursor.getString(0), cursor.getLong(1), cursor.getInt(2), cursor.getLong(3), cursor.getInt(4), cursor.getLong(5), cursor.getString(6)))
         }
     }
 
@@ -44,18 +45,21 @@ class ProgressRepository(private val helper: GameDatabase) {
         }
     }
 
-    fun recordPending(id: String, batchId: String?, cardId: Long, reps: Int, reviewTime: Long, rating: String, elapsedMs: Long) {
+    fun recordPending(id: String, batchId: String?, noteId: Long, ordinal: Int, cardId: Long, reps: Int, reviewTime: Long, rating: String, elapsedMs: Long) {
         require(rating in setOf("again", "hard", "good", "easy") && elapsedMs >= 0)
-        require(cardId > 0 && reps >= 0 && reviewTime >= 0)
+        require(noteId > 0 && ordinal >= 0 && cardId > 0 && reps >= 0 && reviewTime >= 0)
         val db = helper.writableDatabase
         transaction(db) {
             if (batchId != null) {
                 check(exists(db, "SELECT 1 FROM batches WHERE id=? AND state='active'", arrayOf(batchId)))
                 check(!exists(db, "SELECT 1 FROM tickets WHERE status='earned'"))
             }
-            db.insertOrThrow("attempts", null, values("id" to id, "batch_id" to batchId, "card_id" to cardId, "pre_reps" to reps, "pre_review_time" to reviewTime, "rating" to rating, "elapsed_ms" to elapsedMs, "status" to "pending"))
+            db.insertOrThrow("attempts", null, values("id" to id, "batch_id" to batchId, "note_id" to noteId, "ord" to ordinal, "card_id" to cardId, "pre_reps" to reps, "pre_review_time" to reviewTime, "rating" to rating, "elapsed_ms" to elapsedMs, "status" to "pending"))
         }
     }
+
+    /** Parent decision: AnkiDroid shows the review was recorded. Credits the batch exactly like a verified confirmation. */
+    fun resolveAsRecorded(id: String): Boolean = confirm(id)
 
     fun markUncertain(id: String) {
         val count = helper.writableDatabase.update("attempts", values("status" to "uncertain"), "id=? AND status='pending'", arrayOf(id))

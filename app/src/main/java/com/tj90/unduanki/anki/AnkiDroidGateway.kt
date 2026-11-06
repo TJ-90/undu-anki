@@ -7,7 +7,7 @@ import android.net.Uri
 import org.json.JSONArray
 
 /** Read-only provider foundation. Run provider calls away from the main thread. */
-internal class AnkiDroidGateway(private val resolver: ContentResolver, private val deckId: Long) : AnkiGateway {
+internal class AnkiDroidGateway(private val resolver: ContentResolver, private val deckId: Long) : AnkiGateway, CardReader {
     data class ScheduledCard(
         val noteId: Long,
         val ordinal: Int,
@@ -86,6 +86,8 @@ internal class AnkiDroidGateway(private val resolver: ContentResolver, private v
     }
 
     internal data class Snapshot(val state: CardState, val queue: Int, val due: Long, val interval: Long)
+
+    override fun readCard(ref: CardRef): CardState = readCard(ref.noteId, ref.ordinal).state
 
     /** Read-only inspection of a specific card, used by the provider gate. */
     internal fun inspect(noteId: Long, ordinal: Int): Snapshot = readCard(noteId, ordinal)

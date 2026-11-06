@@ -29,7 +29,7 @@ class IslandPersistenceTest {
         val progress = ProgressRepository(db)
         val batch = progress.startBatch("synthetic", 3, 42, "easy")
         for (card in 1..3) {
-            progress.recordPending("attempt-$card", batch, card.toLong(), 0, 0, "again", 50)
+            progress.recordPending("attempt-$card", batch, card.toLong(), 0, card.toLong(), 0, 0, "again", 50)
             progress.confirm("attempt-$card")
         }
         val ticket = db.readableDatabase.rawQuery("SELECT id FROM tickets WHERE status='earned'", null).use {

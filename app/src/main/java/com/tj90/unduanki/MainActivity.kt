@@ -162,7 +162,7 @@ class MainActivity : Activity() {
                 "Good · remembered" to "good", "Easy · remembered very easily" to "easy").forEach { (label, rating) ->
                 button(root, label) {
                     val id = UUID.randomUUID().toString()
-                    progress.recordPending(id, batch, (index + 1).toLong(), 0, 0, rating, 0)
+                    progress.recordPending(id, batch, (index + 1).toLong(), 0, (index + 1).toLong(), 0, 0, rating, 0)
                     if (progress.confirm(id)) home() else study()
                 }
             }

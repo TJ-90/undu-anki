@@ -62,7 +62,7 @@ class AnkiDroidProviderGateTest {
             assertEquals("Refusing to write to a nonempty collection", 0, it.count)
         }
         val modelId = basicModelId(root)
-        val noteIds = (1..4).map { n ->
+        val noteIds = (1..6).map { n ->
             val values = ContentValues().apply {
                 put("mid", modelId)
                 put("flds", "Synthetic rating $n question\u001fSynthetic rating $n answer")
@@ -86,7 +86,7 @@ class AnkiDroidProviderGateTest {
             assertEquals("A new synthetic card must have no prior reviews", 0, before.state.reps)
             assertEquals(before.state, gateway.readState(before.cardId))
             assertEquals(com.tj90.unduanki.study.SubmissionResult.CONFIRMED,
-                coordinator.submit("gate-$index", null, before.state, rating, 1500))
+                coordinator.submit("gate-$index", null, CardRef(before.noteId, before.ordinal), before.state, rating, 1500))
             val after = gateway.inspect(before.noteId, before.ordinal)
             assertEquals(before.state.reps + 1, after.state.reps)
             assertTrue(after.state.lastReviewTimeSeconds > before.state.lastReviewTimeSeconds)
@@ -104,7 +104,53 @@ class AnkiDroidProviderGateTest {
         assertTrue("Hard ${delay(Rating.HARD)} !< Good ${delay(Rating.GOOD)}", delay(Rating.HARD) < delay(Rating.GOOD))
         assertEquals(2, outcomes.getValue(Rating.EASY).queue)
         assertTrue(outcomes.getValue(Rating.EASY).interval >= 1)
+        reconcileInterruptedReviews(gateway, noteIds, answered)
         android.util.Log.i("MischiefGate", "observed delays s: again=${delay(Rating.AGAIN)} hard=${delay(Rating.HARD)} good=${delay(Rating.GOOD)} easyInterval=${outcomes.getValue(Rating.EASY).interval}d")
+    }
+
+    /**
+     * Real provider, real on-disk journal: an interruption after the provider write must recover
+     * without a second review; one before the write must never be resubmitted automatically.
+     */
+    private fun reconcileInterruptedReviews(gateway: AnkiDroidGateway, noteIds: List<Long>, answered: MutableSet<Long>) {
+        val name = "gate-${java.util.UUID.randomUUID()}.db"
+        val db = com.tj90.unduanki.data.GameDatabase(context, databaseName = name)
+        try {
+            val progress = com.tj90.unduanki.data.ProgressRepository(db)
+            val store = com.tj90.unduanki.study.PersistentRecoveryStore(progress)
+            val recovery = com.tj90.unduanki.study.ReviewRecovery(gateway, store)
+
+            // A: provider recorded the review, then the process died before local confirmation.
+            val a = gateway.nextCard()!!
+            assertTrue("Scheduler repeated an answered card", answered.add(a.cardId))
+            assertTrue(a.noteId in noteIds)
+            val refA = CardRef(a.noteId, a.ordinal)
+            val dying = object : com.tj90.unduanki.study.ReviewJournal by com.tj90.unduanki.study.PersistentReviewJournal(progress) {
+                override fun confirmed(id: String) { throw IllegalStateException("process died before local confirmation") }
+            }
+            assertEquals(com.tj90.unduanki.study.SubmissionResult.UNCERTAIN,
+                com.tj90.unduanki.study.ReviewSubmissionCoordinator(gateway, dying).submit("lost-confirmation", null, refA, a.state, Rating.GOOD, 900))
+            assertEquals("uncertain", progress.unresolvedAttempts().single().status)
+            assertEquals("Provider should hold exactly the one review", a.state.reps + 1, gateway.inspect(a.noteId, a.ordinal).state.reps)
+            assertEquals(com.tj90.unduanki.study.RecoveryOutcome.CONFIRMED, recovery.recover(store.unresolved().single()))
+            assertTrue(progress.unresolvedAttempts().isEmpty())
+            assertEquals("Recovery must not write again", a.state.reps + 1, gateway.inspect(a.noteId, a.ordinal).state.reps)
+
+            // B: the process died before the provider write. Recovery must not guess or resubmit.
+            val b = gateway.nextCard()!!
+            assertTrue("Scheduler repeated an answered card", answered.add(b.cardId))
+            val refB = CardRef(b.noteId, b.ordinal)
+            com.tj90.unduanki.study.PersistentReviewJournal(progress).pending("never-written", null, refB, b.state, Rating.EASY, 800)
+            assertEquals(com.tj90.unduanki.study.RecoveryOutcome.UNCHANGED, recovery.recover(store.unresolved().single()))
+            assertEquals("uncertain", progress.unresolvedAttempts().single().status)
+            assertEquals("Recovery must never replay a write", b.state, gateway.inspect(b.noteId, b.ordinal).state)
+            progress.abandonUnresolved("never-written")
+            answered.remove(b.cardId)
+            assertEquals("After 'not recorded' the same card is scheduled fresh", b.cardId, gateway.nextCard()!!.cardId)
+        } finally {
+            db.close()
+            context.deleteDatabase(name)
+        }
     }
 
     private fun basicModelId(root: String): Long {
@@ -124,7 +170,7 @@ class AnkiDroidProviderGateTest {
 
     private class RecordingJournal : com.tj90.unduanki.study.ReviewJournal {
         val events = mutableListOf<String>()
-        override fun pending(id: String, batchId: String?, before: CardState, rating: Rating, elapsedMs: Long) { events += "pending:$id" }
+        override fun pending(id: String, batchId: String?, ref: CardRef, before: CardState, rating: Rating, elapsedMs: Long) { events += "pending:$id" }
         override fun uncertain(id: String) { events += "uncertain:$id" }
         override fun confirmed(id: String) { events += "confirmed:$id" }
     }
