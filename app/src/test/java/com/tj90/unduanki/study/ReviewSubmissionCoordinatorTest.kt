@@ -32,4 +32,29 @@ class ReviewSubmissionCoordinatorTest {
         assertEquals(SubmissionResult.STALE, ReviewSubmissionCoordinator(gateway, journal).submit("a", null, before, Rating.GOOD, 1))
         assertEquals("", journal.status)
     }
+    @Test fun successfulReadbackConfirmsEveryRating() {
+        for (rating in Rating.entries) {
+            val journal = Journal()
+            var state = before
+            val gateway = object : AnkiGateway {
+                override fun readState(cardId: Long) = state
+                override fun answer(cardId: Long, rating: Rating, elapsedMs: Long) {
+                    state = before.copy(reps = before.reps + 1, lastReviewTimeSeconds = 11)
+                }
+            }
+            assertEquals(SubmissionResult.CONFIRMED, ReviewSubmissionCoordinator(gateway, journal).submit("id", "batch", before, rating, 10))
+            assertEquals("confirmed", journal.status)
+        }
+    }
+    @Test fun providerExceptionIsUncertainAfterOneWrite() {
+        val journal = Journal()
+        var writes = 0
+        val gateway = object : AnkiGateway {
+            override fun readState(cardId: Long) = before
+            override fun answer(cardId: Long, rating: Rating, elapsedMs: Long) { writes++; error("unknown outcome") }
+        }
+        assertEquals(SubmissionResult.UNCERTAIN, ReviewSubmissionCoordinator(gateway, journal).submit("id", null, before, Rating.EASY, 10))
+        assertEquals(1, writes)
+        assertEquals("uncertain", journal.status)
+    }
 }
