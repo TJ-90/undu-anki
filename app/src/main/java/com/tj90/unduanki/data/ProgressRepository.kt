@@ -35,6 +35,15 @@ class ProgressRepository(private val helper: GameDatabase) {
         }
     }
 
+    /** The parent must confirm a deck switch before invoking this operation. */
+    fun abandonBatch(batchId: String) {
+        val db = helper.writableDatabase
+        transaction(db) {
+            check(!exists(db, "SELECT 1 FROM attempts WHERE batch_id=? AND status IN ('pending','uncertain')", arrayOf(batchId)))
+            check(db.update("batches", values("state" to "abandoned"), "id=? AND state='active'", arrayOf(batchId)) == 1)
+        }
+    }
+
     fun recordPending(id: String, batchId: String?, cardId: Long, reps: Int, reviewTime: Long, rating: String, elapsedMs: Long) {
         require(rating in setOf("again", "hard", "good", "easy") && elapsedMs >= 0)
         require(cardId > 0 && reps >= 0 && reviewTime >= 0)
