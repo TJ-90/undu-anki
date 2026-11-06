@@ -37,7 +37,15 @@ class ProgressRepository(private val helper: GameDatabase) {
 
     fun recordPending(id: String, batchId: String?, cardId: Long, reps: Int, reviewTime: Long, rating: String, elapsedMs: Long) {
         require(rating in setOf("again", "hard", "good", "easy") && elapsedMs >= 0)
-        helper.writableDatabase.insertOrThrow("attempts", null, values("id" to id, "batch_id" to batchId, "card_id" to cardId, "pre_reps" to reps, "pre_review_time" to reviewTime, "rating" to rating, "elapsed_ms" to elapsedMs, "status" to "pending"))
+        require(cardId > 0 && reps >= 0 && reviewTime >= 0)
+        val db = helper.writableDatabase
+        transaction(db) {
+            if (batchId != null) {
+                check(exists(db, "SELECT 1 FROM batches WHERE id=? AND state='active'", arrayOf(batchId)))
+                check(!exists(db, "SELECT 1 FROM tickets WHERE status='earned'"))
+            }
+            db.insertOrThrow("attempts", null, values("id" to id, "batch_id" to batchId, "card_id" to cardId, "pre_reps" to reps, "pre_review_time" to reviewTime, "rating" to rating, "elapsed_ms" to elapsedMs, "status" to "pending"))
+        }
     }
 
     fun markUncertain(id: String) {
