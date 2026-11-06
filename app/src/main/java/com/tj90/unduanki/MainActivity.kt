@@ -2,6 +2,9 @@ package com.tj90.unduanki
 
 import android.app.Activity
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.Button
@@ -78,6 +81,53 @@ class MainActivity : Activity() {
             button(root, "Visit demo island") { showIsland() }
             button(root, "Play tutorial again") { run(RunnerMode.TUTORIAL) }
         }
+        val parent = TextView(this).apply {
+            text = "Parent settings · press and hold for 3 seconds"
+            textSize = 16f
+            setPadding(0, 24, 0, 24)
+        }
+        val handler = Handler(Looper.getMainLooper())
+        val openSettings = Runnable { parentSettings() }
+        parent.setOnClickListener { }
+        parent.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> { handler.postDelayed(openSettings, 3000); true }
+                MotionEvent.ACTION_MOVE -> {
+                    if (event.x < 0 || event.y < 0 || event.x > parent.width || event.y > parent.height)
+                        handler.removeCallbacks(openSettings)
+                    true
+                }
+                MotionEvent.ACTION_UP -> { handler.removeCallbacks(openSettings); parent.performClick(); true }
+                MotionEvent.ACTION_CANCEL -> { handler.removeCallbacks(openSettings); true }
+                else -> true
+            }
+        }
+        root.addView(parent)
+        show(scroll(root))
+    }
+
+    private fun parentSettings() {
+        val root = layout("Demo parent settings")
+        val target = prefs.getInt("batch-size", 5)
+        root.addView(TextView(this).apply { text = "Questions per mission: $target"; textSize = 18f })
+        button(root, "Fewer questions") {
+            prefs.edit().putInt("batch-size", (target - 1).coerceAtLeast(3)).apply(); parentSettings()
+        }
+        button(root, "More questions") {
+            prefs.edit().putInt("batch-size", (target + 1).coerceAtMost(10)).apply(); parentSettings()
+        }
+        val normal = prefs.getBoolean("normal-difficulty", false)
+        button(root, "Runner difficulty: ${if (normal) "Normal" else "Easy"}") {
+            prefs.edit().putBoolean("normal-difficulty", !normal).apply(); parentSettings()
+        }
+        val buttons = prefs.getBoolean("runner-buttons", true)
+        button(root, "Runner buttons: ${if (buttons) "On" else "Off"}") {
+            prefs.edit().putBoolean("runner-buttons", !buttons).apply(); parentSettings()
+        }
+        root.addView(TextView(this).apply {
+            text = "Real AnkiDroid connection and deck settings are not available yet. Settings apply to new demo batches; an existing mission keeps its difficulty."
+        })
+        button(root, "Home") { home() }
         show(scroll(root))
     }
 
@@ -94,13 +144,14 @@ class MainActivity : Activity() {
     ).use { if (it.moveToFirst()) it.getString(0) else null }
 
     private fun study() {
-        val batch = activeBatch() ?: progress.startBatch("synthetic-demo", questions.size, System.currentTimeMillis(), "easy")
+        val batch = activeBatch() ?: progress.startBatch("synthetic-demo", prefs.getInt("batch-size", 5),
+            System.currentTimeMillis(), if (prefs.getBoolean("normal-difficulty", false)) "normal" else "easy")
         val answered = mutableSetOf<Long>()
         database.readableDatabase.rawQuery("SELECT card_id FROM credits WHERE batch_id=?", arrayOf(batch)).use {
             while (it.moveToNext()) answered.add(it.getLong(0))
         }
         val index = questions.indices.firstOrNull { (it + 1).toLong() !in answered }
-        if (index == null) { home(); return }
+        if (index == null) { progress.finishExhausted(batch); home(); return }
         val root = layout("Sample question ${answered.size + 1} of ${questions.size}")
         root.addView(TextView(this).apply { text = questions[index].first; textSize = 22f })
         button(root, "Reveal answer") {
@@ -121,8 +172,9 @@ class MainActivity : Activity() {
     }
 
     private fun run(mode: RunnerMode, ticket: Ticket? = null) {
-        val screen = RunnerScreen(this, ticket?.seed ?: System.currentTimeMillis(), ticket?.difficulty ?: RunnerDifficulty.EASY,
-            mode, onFinished = { result ->
+        val difficulty = ticket?.difficulty ?: if (prefs.getBoolean("normal-difficulty", false)) RunnerDifficulty.NORMAL else RunnerDifficulty.EASY
+        val screen = RunnerScreen(this, ticket?.seed ?: System.currentTimeMillis(), difficulty,
+            mode, showButtons = prefs.getBoolean("runner-buttons", true), onFinished = { result ->
                 if (mode == RunnerMode.TUTORIAL && result.status == RunnerStatus.WON)
                     prefs.edit().putBoolean("tutorial-completed", true).apply()
                 val settled = if (mode == RunnerMode.MISSION && ticket != null)

@@ -13,22 +13,28 @@ class IslandScreen(context: Context, private val repository: IslandRepository) :
 
     init { orientation = VERTICAL; refresh() }
 
+    private fun selectSlot(slot: Int, state: IslandRepository.Snapshot) {
+        val item = state.placements[slot]
+        val label = item?.let { ItemCatalog.find(it)?.label ?: it }
+        if (item != null) { selected = item; message = "$label selected. Choose an empty slot or return it to inventory." }
+        else if (selected != null && repository.place(selected!!, slot)) { selected = null; message = "Decoration placed." }
+        else message = "Select an owned decoration first."
+        refresh()
+    }
+
     private fun refresh() {
         removeAllViews()
         val state = repository.snapshot()
         addView(TextView(context).apply { text = "Island · ${state.stars} stars\n" + if (state.rescued) "Your penguin is home!" else "Rescue the lost penguin!" })
         addView(TextView(context).apply { text = message })
+        addView(IslandView(context, state) { slot -> selectSlot(slot, state) },
+            LayoutParams(LayoutParams.MATCH_PARENT, LayoutParams.WRAP_CONTENT))
         for (slot in 1..6) {
             val item = state.placements[slot]
             val label = item?.let { ItemCatalog.find(it)?.label ?: it } ?: "Empty"
             addView(Button(context).apply {
                 text = "Slot $slot: $label"
-                setOnClickListener {
-                    if (item != null) { selected = item; message = "$label selected. Choose an empty slot or return it to inventory." }
-                    else if (selected != null && repository.place(selected!!, slot)) { selected = null; message = "Decoration placed." }
-                    else message = "Select an owned decoration first."
-                    refresh()
-                }
+                setOnClickListener { selectSlot(slot, state) }
             })
         }
         addView(Button(context).apply {
