@@ -10,6 +10,7 @@ android {
         applicationId = "com.tj90.unduanki"
         minSdk = 26
         targetSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = (System.getenv("FAMILY_VERSION_CODE") ?: "1").toInt()
         versionName = "0.1-" + (System.getenv("GITHUB_SHA")?.take(7) ?: "local")
     }
@@ -32,4 +33,6 @@ android {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
 }

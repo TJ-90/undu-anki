@@ -6,8 +6,8 @@ import android.database.sqlite.SQLiteOpenHelper
 import com.tj90.unduanki.island.IslandRepository
 
 /** Live and synthetic progress must never share a database. */
-class GameDatabase(context: Context, demo: Boolean = false) :
-    SQLiteOpenHelper(context, if (demo) "demo-progress.db" else "game-progress.db", null, 1) {
+class GameDatabase(context: Context, demo: Boolean = false, databaseName: String? = null) :
+    SQLiteOpenHelper(context, databaseName ?: if (demo) "demo-progress.db" else "game-progress.db", null, 1) {
     override fun onConfigure(db: SQLiteDatabase) {
         super.onConfigure(db)
         db.setForeignKeyConstraintsEnabled(true)
