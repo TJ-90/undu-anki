@@ -3,6 +3,7 @@ package com.tj90.unduanki.data
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import android.database.sqlite.SQLiteOpenHelper
+import com.tj90.unduanki.island.IslandRepository
 
 /** Live and synthetic progress must never share a database. */
 class GameDatabase(context: Context, demo: Boolean = false) :
@@ -20,6 +21,7 @@ class GameDatabase(context: Context, demo: Boolean = false) :
         db.execSQL("CREATE TABLE credits (batch_id TEXT NOT NULL REFERENCES batches(id), card_id INTEGER NOT NULL, PRIMARY KEY(batch_id, card_id))")
         db.execSQL("CREATE TABLE tickets (id TEXT PRIMARY KEY, batch_id TEXT NOT NULL UNIQUE REFERENCES batches(id), seed INTEGER NOT NULL, difficulty TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('earned','settled'))) ")
         db.execSQL("CREATE UNIQUE INDEX one_earned_ticket ON tickets(status) WHERE status = 'earned'")
+        IslandRepository.createSchema(db)
     }
 
     override fun onUpgrade(db: SQLiteDatabase, oldVersion: Int, newVersion: Int) {
