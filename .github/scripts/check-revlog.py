@@ -23,7 +23,8 @@ rows = connection.execute("select ease, time, type, ivl from revlog order by id"
 got_eases = [row[0] for row in rows]
 ok = got_eases == expected_eases
 if expected_times is not None:
-    ok = ok and [row[1] for row in rows] == expected_times
+    # AnkiDroid stores the elapsed time with up to a few milliseconds of rounding; eases and row count stay exact.
+    ok = ok and len(rows) == len(expected_times) and all(abs(row[1] - want) <= 10 for row, want in zip(rows, expected_times))
 else:
     ok = ok and all(0 <= row[1] <= 60000 for row in rows)
 lines = ["ease,time_ms,type,ivl"] + [",".join(map(str, row)) for row in rows]
