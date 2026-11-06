@@ -150,9 +150,35 @@ jobs:
                   break
           if not started:
               raise SystemExit("AnkiDroid Get started screen not found; see onboarding.xml")
-          time.sleep(15)
+          # Fresh AnkiDroid blocks on a permissions screen (All files access) until granted; the
+          # collection is not opened, so the provider returns null cursors. Disposable emulator only.
+          subprocess.run(["adb", "shell", "appops", "set", "com.ichi2.anki", "MANAGE_EXTERNAL_STORAGE", "allow"], check=True)
+          subprocess.run(["adb", "shell", "monkey", "-p", "com.ichi2.anki", "-c", "android.intent.category.LAUNCHER", "1"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+          continued = False
+          for attempt in range(40):
+              time.sleep(3)
+              subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/window.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+              xml = subprocess.run(["adb", "exec-out", "cat", "/sdcard/window.xml"], capture_output=True).stdout
+              (evidence / "after-get-started.xml").write_bytes(xml)
+              try:
+                  root = ET.fromstring(xml)
+              except ET.ParseError:
+                  continue
+              for node in root.iter("node"):
+                  if node.get("resource-id", "").endswith(":id/continue_button") and node.get("enabled") == "true":
+                      bounds = re.fullmatch(r"\[(\d+),(\d+)\]\[(\d+),(\d+)\]", node.get("bounds", ""))
+                      if bounds:
+                          x1, y1, x2, y2 = map(int, bounds.groups())
+                          subprocess.run(["adb", "shell", "input", "tap", str((x1+x2)//2), str((y1+y2)//2)], check=True)
+                          continued = True
+                          break
+              if continued:
+                  break
+          if not continued:
+              raise SystemExit("AnkiDroid permissions Continue never became enabled; see after-get-started.xml")
+          time.sleep(20)
           subprocess.run(["adb", "shell", "uiautomator", "dump", "/sdcard/after.xml"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-          (evidence / "after-get-started.xml").write_bytes(subprocess.run(["adb", "exec-out", "cat", "/sdcard/after.xml"], capture_output=True).stdout)
+          (evidence / "after-continue.xml").write_bytes(subprocess.run(["adb", "exec-out", "cat", "/sdcard/after.xml"], capture_output=True).stdout)
           '
           ./gradlew :app:assembleDebug
           adb install -r app/build/outputs/apk/debug/app-debug.apk
