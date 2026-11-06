@@ -41,4 +41,13 @@ class ProgressRepositoryTest {
         progress.abandonUnresolved("pending")
         assertTrue(progress.unresolvedAttempts().isEmpty())
     }
+    @Test fun cannotAbandonBatchWhileReviewIsUnresolved() {
+        val batch = progress.startBatch("synthetic", 3, 42, "easy")
+        progress.recordPending("pending", batch, 7, 1, 10, "good", 100)
+        try { progress.abandonBatch(batch); fail("unresolved review discarded") } catch (_: IllegalStateException) { }
+        progress.abandonUnresolved("pending")
+        progress.abandonBatch(batch)
+        val next = progress.startBatch("new-deck", 3, 43, "normal")
+        assertNotEquals(batch, next)
+    }
 }
