@@ -1,6 +1,6 @@
 # Mischief Island
 
-**Status: foundation only.** The app does not yet provide AnkiDroid study, gameplay, or persistent progress. Do not use it for a family trial.
+**Status: synthetic demo only.** The app offers sample questions, runner gameplay, and a separate local demo island save. Real AnkiDroid study and the family build are not verified. Do not use it for a family trial.
 
 The planned distribution is [GitHub Actions](https://github.com/TJ-90/undu-anki/actions). The debug build is disposable and installs separately as “Mischief Island Test”; it is not a durable family installation. Once implemented and verified, choose **Family APK** → **Run workflow** on `main`, download the artifact ZIP from the completed run, extract it on Android and open the APK. Android may ask you to allow installs from that download source. Install updates over the existing family app; uninstalling can delete its local island data. Game saves are local and do not sync through AnkiWeb.
 
