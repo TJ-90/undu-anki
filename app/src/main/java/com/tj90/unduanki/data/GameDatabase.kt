@@ -14,7 +14,7 @@ class GameDatabase(context: Context, demo: Boolean = false) :
     }
 
     override fun onCreate(db: SQLiteDatabase) {
-        db.execSQL("CREATE TABLE batches (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, target INTEGER NOT NULL CHECK(target BETWEEN 3 AND 10), state TEXT NOT NULL CHECK(state IN ('active','completed','abandoned'))) ")
+        db.execSQL("CREATE TABLE batches (id TEXT PRIMARY KEY, connection_id TEXT NOT NULL, target INTEGER NOT NULL CHECK(target BETWEEN 3 AND 10), seed INTEGER NOT NULL, difficulty TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('active','completed','abandoned'))) ")
         db.execSQL("CREATE UNIQUE INDEX one_active_batch ON batches(state) WHERE state = 'active'")
         db.execSQL("CREATE TABLE attempts (id TEXT PRIMARY KEY, batch_id TEXT REFERENCES batches(id), card_id INTEGER NOT NULL, pre_reps INTEGER NOT NULL, pre_review_time INTEGER NOT NULL, rating TEXT NOT NULL, elapsed_ms INTEGER NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','confirmed','uncertain','abandoned'))) ")
         db.execSQL("CREATE UNIQUE INDEX one_unresolved_attempt ON attempts((1)) WHERE status IN ('pending','uncertain')")

@@ -6,13 +6,14 @@ import java.util.UUID
 
 /** Mutations are transactional; provider writes must happen separately and are never replayed here. */
 class ProgressRepository(private val helper: GameDatabase) {
-    fun startBatch(connectionId: String, target: Int): String {
+    fun startBatch(connectionId: String, target: Int, seed: Long, difficulty: String): String {
+        require(difficulty in setOf("easy", "normal"))
         require(target in 3..10)
         val db = helper.writableDatabase
         return transaction(db) {
             check(!exists(db, "SELECT 1 FROM tickets WHERE status='earned'"))
             val id = UUID.randomUUID().toString()
-            db.insertOrThrow("batches", null, values("id" to id, "connection_id" to connectionId, "target" to target, "state" to "active"))
+            db.insertOrThrow("batches", null, values("id" to id, "connection_id" to connectionId, "target" to target, "seed" to seed, "difficulty" to difficulty, "state" to "active"))
             id
         }
     }
@@ -28,7 +29,7 @@ class ProgressRepository(private val helper: GameDatabase) {
     }
 
     /** Confirm only after externally verified readback. A repeated card earns one credit. */
-    fun confirm(id: String, seed: Long, difficulty: String): Boolean {
+    fun confirm(id: String): Boolean {
         val db = helper.writableDatabase
         return transaction(db) {
             val row = db.rawQuery("SELECT batch_id, card_id FROM attempts WHERE id=? AND status IN ('pending','uncertain')", arrayOf(id)).use {
@@ -40,22 +41,23 @@ class ProgressRepository(private val helper: GameDatabase) {
             check(exists(db, "SELECT 1 FROM batches WHERE id=? AND state='active'", arrayOf(batch)))
             db.insertWithOnConflict("credits", null, values("batch_id" to batch, "card_id" to row.second), SQLiteDatabase.CONFLICT_IGNORE)
             val counts = db.rawQuery("SELECT target, (SELECT COUNT(*) FROM credits WHERE batch_id=?) FROM batches WHERE id=?", arrayOf(batch, batch)).use { it.moveToFirst(); it.getInt(0) to it.getInt(1) }
-            if (counts.second >= counts.first) issueTicket(db, batch, seed, difficulty) else false
+            if (counts.second >= counts.first) issueTicket(db, batch) else false
         }
     }
 
     /** Call only when the scheduler positively reports exhaustion, not on errors. */
-    fun finishExhausted(batchId: String, seed: Long, difficulty: String): Boolean {
+    fun finishExhausted(batchId: String): Boolean {
         val db = helper.writableDatabase
         return transaction(db) {
             check(!exists(db, "SELECT 1 FROM attempts WHERE status IN ('pending','uncertain')"))
             check(exists(db, "SELECT 1 FROM batches WHERE id=? AND state='active'", arrayOf(batchId)))
-            if (exists(db, "SELECT 1 FROM credits WHERE batch_id=?", arrayOf(batchId))) issueTicket(db, batchId, seed, difficulty) else false
+            if (exists(db, "SELECT 1 FROM credits WHERE batch_id=?", arrayOf(batchId))) issueTicket(db, batchId) else false
         }
     }
 
-    private fun issueTicket(db: SQLiteDatabase, batch: String, seed: Long, difficulty: String): Boolean {
-        db.insertOrThrow("tickets", null, values("id" to UUID.randomUUID().toString(), "batch_id" to batch, "seed" to seed, "difficulty" to difficulty, "status" to "earned"))
+    private fun issueTicket(db: SQLiteDatabase, batch: String): Boolean {
+        val config = db.rawQuery("SELECT seed, difficulty FROM batches WHERE id=? AND state='active'", arrayOf(batch)).use { check(it.moveToFirst()); it.getLong(0) to it.getString(1) }
+        db.insertOrThrow("tickets", null, values("id" to UUID.randomUUID().toString(), "batch_id" to batch, "seed" to config.first, "difficulty" to config.second, "status" to "earned"))
         check(db.update("batches", values("state" to "completed"), "id=? AND state='active'", arrayOf(batch)) == 1)
         return true
     }
