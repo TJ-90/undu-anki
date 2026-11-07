@@ -22,6 +22,9 @@ class CardMappingOnDeviceTest {
         val mapped = CardContentMapper.map(listOf(forward), FieldMapping("Front", "Back"),
             mapOf("Front" to "<b>Why?</b>", "Back" to "Because<br>yes"))
         assertEquals(MappedCard("<b>Why?</b>", "Because<br>yes"), mapped)
+        // An apostrophe stored as a numeric code is accepted (the real deck stores them this way).
+        val apostrophe = CardContentMapper.map(listOf(forward), FieldMapping("Front", "Back"), mapOf("Front" to "What&#x27;s this?", "Back" to "It&#39;s a test"))
+        assertEquals(MappedCard("What&#x27;s this?", "It&#39;s a test"), apostrophe)
     }
 
     @Test fun unsafeContentAndLayoutsAreRejectedOnDevice() {

@@ -15,6 +15,7 @@ object CardContentMapper {
     private val allowedTagNames = setOf("b", "strong", "i", "em", "u", "s", "strike", "br", "p", "div", "ul", "ol", "li", "sub", "sup")
     private val anyTag = Regex("<\\s*/?\\s*([A-Za-z][A-Za-z0-9]*)[^>]*>")
     private val characterCode = Regex("&#?[A-Za-z0-9]+;")
+    private val numericReference = Regex("&#(?:[xX]([0-9a-fA-F]{1,6})|([0-9]{1,7}));")
 
     fun map(templates: List<CardTemplate>, mapping: FieldMapping, fields: Map<String, String>): MappedCard? =
         if (rejection(templates, mapping, fields) != null) null
@@ -40,9 +41,21 @@ object CardContentMapper {
         return null
     }
 
+    /**
+     * Drops the named codes the app allows and numeric codes for ordinary printable characters (an apostrophe is
+     * often stored as &#x27; or &#39;). Invalid or control-character codes are left in place so they are rejected.
+     */
+    private fun withoutAllowedEntities(value: String): String = numericReference.replace(entity.replace(value, "")) { match ->
+        val codePoint = match.groupValues[1].takeIf { it.isNotEmpty() }?.toIntOrNull(16) ?: match.groupValues[2].toIntOrNull()
+        if (codePoint != null && isPlainCharacter(codePoint)) "" else match.value
+    }
+
+    private fun isPlainCharacter(codePoint: Int) = Character.isValidCodePoint(codePoint) && codePoint !in 0xD800..0xDFFF &&
+        !Character.isISOControl(codePoint) && Character.isDefined(codePoint)
+
     private fun unsafeReason(value: String): String? {
         unsafeText.find(value)?.let { return "a field contains ${it.value.lowercase()}" }
-        val remainder = entity.replace(fieldTag.replace(value, ""), "")
+        val remainder = withoutAllowedEntities(fieldTag.replace(value, ""))
         anyTag.find(remainder)?.let {
             val name = it.groupValues[1].lowercase()
             return if (name in allowedTagNames) "a field has a <$name> tag with extra settings such as a class or style" else "a field contains a <$name> tag"

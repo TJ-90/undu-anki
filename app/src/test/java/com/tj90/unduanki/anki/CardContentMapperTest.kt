@@ -39,6 +39,12 @@ class CardContentMapperTest {
     @Test fun rejectionNamesTheRuleAndMapAgrees() {
         fun why(front: String, back: String) = CardContentMapper.rejection(listOf(forward), mapping, mapOf("Front" to front, "Back" to back))
         assertNull(why("<b>Q</b>", "A &amp; B<br>C&nbsp;D"))
+        // Apostrophes and other ordinary characters are often stored as numeric codes; they display as the character.
+        assertNull(why("What&#x27;s this?", "Newton&#39;s law &#8217; &#x2019;"))
+        assertEquals("a field contains the character code &#0;", why("Q", "bad &#0; code"))
+        assertEquals("a field contains the character code &#x110000;", why("Q", "&#x110000;"))
+        assertEquals("a field contains the character code &#xD800;", why("Q", "&#xD800;"))
+        assertEquals("a field contains the character code &#x7;", why("Q", "&#x7;"))
         assertEquals("the question is empty", why("", "A"))
         assertEquals("the answer is empty", why("Q", " "))
         assertEquals("a field contains [sound:", why("Q", "[sound:a.mp3]"))
