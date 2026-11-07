@@ -12,23 +12,45 @@ object CardContentMapper {
     private val unsafeText = Regex("\\[sound:|\\[/?latex\\]|\\[/?mathjax\\]|\\\\[\\(\\)\\[\\]]|\\$\\$|\\{\\{", RegexOption.IGNORE_CASE)
     private val expression = Regex("\\{\\{([^{}]+)\\}\\}")
 
-    fun map(templates: List<CardTemplate>, mapping: FieldMapping, fields: Map<String, String>): MappedCard? {
-        if (templates.size != 1 || mapping.question.isBlank() || mapping.answer.isBlank() || mapping.question == mapping.answer) return null
-        val question = fields[mapping.question] ?: return null
-        val answer = fields[mapping.answer] ?: return null
-        if (question.isBlank() || answer.isBlank() || fields.values.any { !safeField(it) }) return null
+    private val allowedTagNames = setOf("b", "strong", "i", "em", "u", "s", "strike", "br", "p", "div", "ul", "ol", "li", "sub", "sup")
+    private val anyTag = Regex("<\\s*/?\\s*([A-Za-z][A-Za-z0-9]*)[^>]*>")
+    private val characterCode = Regex("&#?[A-Za-z0-9]+;")
+
+    fun map(templates: List<CardTemplate>, mapping: FieldMapping, fields: Map<String, String>): MappedCard? =
+        if (rejection(templates, mapping, fields) != null) null
+        else MappedCard(fields.getValue(mapping.question), fields.getValue(mapping.answer))
+
+    /**
+     * Why a note cannot be shown, or null when it can. The wording names the kind of problem (a tag, a character
+     * code, an empty field) and never repeats card text, so a parent can see the cause without exposing the deck.
+     */
+    fun rejection(templates: List<CardTemplate>, mapping: FieldMapping, fields: Map<String, String>): String? {
+        if (templates.size != 1) return "its note type does not have exactly one card template"
+        if (mapping.question.isBlank() || mapping.answer.isBlank() || mapping.question == mapping.answer) return "its question and answer fields are not set up"
+        val question = fields[mapping.question] ?: return "the question field is missing"
+        val answer = fields[mapping.answer] ?: return "the answer field is missing"
+        if (question.isBlank()) return "the question is empty"
+        if (answer.isBlank()) return "the answer is empty"
+        for (value in fields.values) unsafeReason(value)?.let { return it }
         val template = templates.single()
-        if (!safeTemplate(template.question, listOf(mapping.question))) return null
+        if (!safeTemplate(template.question, listOf(mapping.question))) return "the card layout is not a plain question"
         val backExpressions = expression.findAll(template.answer).map { it.groupValues[1].trim() }.toList()
-        if (backExpressions != listOf(mapping.answer) && backExpressions != listOf("FrontSide", mapping.answer)) return null
-        if (!safeTemplate(template.answer, backExpressions)) return null
-        return MappedCard(question, answer)
+        if (backExpressions != listOf(mapping.answer) && backExpressions != listOf("FrontSide", mapping.answer)) return "the card layout is not a plain answer"
+        if (!safeTemplate(template.answer, backExpressions)) return "the card layout is not a plain answer"
+        return null
     }
 
-    private fun safeField(value: String): Boolean {
-        if (unsafeText.containsMatchIn(value)) return false
+    private fun unsafeReason(value: String): String? {
+        unsafeText.find(value)?.let { return "a field contains ${it.value.lowercase()}" }
         val remainder = entity.replace(fieldTag.replace(value, ""), "")
-        return '<' !in remainder && '>' !in remainder && '&' !in remainder
+        anyTag.find(remainder)?.let {
+            val name = it.groupValues[1].lowercase()
+            return if (name in allowedTagNames) "a field has a <$name> tag with extra settings such as a class or style" else "a field contains a <$name> tag"
+        }
+        characterCode.find(remainder)?.let { return "a field contains the character code ${it.value.take(12)}" }
+        if ('<' in remainder || '>' in remainder) return "a field contains a stray < or > character"
+        if ('&' in remainder) return "a field contains a stray & character"
+        return null
     }
 
     private fun safeTemplate(value: String, expected: List<String>): Boolean {

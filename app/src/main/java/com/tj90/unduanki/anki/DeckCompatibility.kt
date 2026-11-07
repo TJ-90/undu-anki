@@ -57,6 +57,13 @@ object DeckCompatibilityChecker {
         return if (probe == null) null to "the card layout contains formatting this app cannot show safely" else mapping to null
     }
 
+    /** "50 × a field contains a <code> tag; 12 × the answer is empty", most common first, never card text. */
+    private fun describe(rejections: List<String>): String {
+        val counts = rejections.groupingBy { it }.eachCount().entries.sortedWith(compareByDescending<Map.Entry<String, Int>> { it.value }.thenBy { it.key })
+        val shown = counts.take(6).joinToString("; ") { "${it.value} × ${it.key}" }
+        return if (counts.size > 6) "$shown; and ${counts.size - 6} other kinds" else shown
+    }
+
     fun evaluate(models: Map<Long, ModelInfo>, notes: List<DeckNote>): DeckCompatibility {
         val verdicts = notes.groupBy { it.modelId }.map { (modelId, group) ->
             val model = models[modelId] ?: ModelInfo(modelId, "Unknown note type", emptyList(), emptyList())
@@ -64,14 +71,15 @@ object DeckCompatibilityChecker {
             if (mapping == null) {
                 ModelVerdict(model, null, 0, group.size, reason)
             } else {
-                val supported = group.count { note ->
-                    note.fields.size == model.fieldNames.size &&
-                        CardContentMapper.map(model.templates, mapping, model.fieldNames.zip(note.fields).toMap()) != null
+                val rejections = group.mapNotNull { note ->
+                    if (note.fields.size != model.fieldNames.size) "the note has a different number of fields than its note type"
+                    else CardContentMapper.rejection(model.templates, mapping, model.fieldNames.zip(note.fields).toMap())
                 }
-                val unsupported = group.size - supported
+                val unsupported = rejections.size
+                val supported = group.size - unsupported
                 ModelVerdict(
                     model, mapping, supported, unsupported,
-                    if (unsupported == 0) null else "$unsupported of ${group.size} notes contain images, sounds, formulas, links, or formatting this app cannot show"
+                    if (unsupported == 0) null else "$unsupported of ${group.size} notes cannot be shown (${describe(rejections)})"
                 )
             }
         }.sortedBy { it.model.name }

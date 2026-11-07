@@ -35,4 +35,22 @@ class CardContentMapperTest {
             CardTemplate("{{Front}} {{Back}}", "{{Back}}")
         )) assertNull(CardContentMapper.map(listOf(template), mapping, fields))
     }
+
+    @Test fun rejectionNamesTheRuleAndMapAgrees() {
+        fun why(front: String, back: String) = CardContentMapper.rejection(listOf(forward), mapping, mapOf("Front" to front, "Back" to back))
+        assertNull(why("<b>Q</b>", "A &amp; B<br>C&nbsp;D"))
+        assertEquals("the question is empty", why("", "A"))
+        assertEquals("the answer is empty", why("Q", " "))
+        assertEquals("a field contains [sound:", why("Q", "[sound:a.mp3]"))
+        assertEquals("a field contains a <img> tag", why("<img src=x>", "A"))
+        assertEquals("a field contains a <span> tag", why("Q", "<span style='c'>A</span>"))
+        assertEquals("a field has a <div> tag with extra settings such as a class or style", why("Q", "<div class=\"c\">A</div>"))
+        assertEquals("a field contains the character code &rarr;", why("Q", "a &rarr; b"))
+        assertEquals("a field contains a stray < or > character", why("a < b", "A"))
+        assertEquals("a field contains a stray & character", why("AT&T", "A"))
+        // Whatever rejection says, map() must give the same verdict.
+        for ((front, back) in listOf("Q" to "A", "" to "A", "<img>" to "A", "Q" to "&rarr;")) {
+            assertEquals(why(front, back) == null, CardContentMapper.map(listOf(forward), mapping, mapOf("Front" to front, "Back" to back)) != null)
+        }
+    }
 }

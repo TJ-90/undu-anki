@@ -41,6 +41,25 @@ class DeckCompatibilityTest {
         assertEquals(2, result.verdicts.single().unsupportedNotes)
     }
 
+    @Test fun summaryNamesTheActualReasonsWithCountsAndNoCardText() {
+        val result = DeckCompatibilityChecker.evaluate(models, listOf(
+            note(1, 1, "Q", "A"),
+            note(2, 1, "secret one", "<div class=\"x\">secret two</div>"),
+            note(3, 1, "secret three", "<div style=\"y\">secret four</div>"),
+            note(4, 1, "Q", "   "),
+            note(5, 1, "Q", "a &rarr; b"),
+            note(6, 1, "<code>secret five</code>", "A")
+        ))
+        val summary = result.summary()
+        assertEquals(5, result.verdicts.single().unsupportedNotes)
+        assertTrue(summary, summary.contains("5 of 6 notes cannot be shown"))
+        assertTrue(summary, summary.contains("2 × a field has a <div> tag with extra settings"))
+        assertTrue(summary, summary.contains("1 × the answer is empty"))
+        assertTrue(summary, summary.contains("1 × a field contains the character code &rarr;"))
+        assertTrue(summary, summary.contains("1 × a field contains a <code> tag"))
+        assertFalse(summary, summary.contains("secret"))
+    }
+
     @Test fun mixedDeckReportsOnlyTheProblemTypes() {
         val result = DeckCompatibilityChecker.evaluate(models, listOf(note(1, 1, "Q", "A"), note(2, 2, "Q", "A")))
         assertFalse(result.usable)
